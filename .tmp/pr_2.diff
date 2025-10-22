@@ -1,0 +1,241 @@
+diff --git a/entries.js b/entries.js
+index 81ce5c8..c89197b 100644
+--- a/entries.js
++++ b/entries.js
+@@ -21,6 +21,9 @@ function init() {
+ 	});
+ 	makeTable();
+ 
++    // Initialize Ivideon credentials section if present
++    initIvideonOptions();
++
+ }
+ 
+ function firstRun(){
+@@ -32,6 +35,57 @@ function firstRun(){
+ 	}
+ }
+ 
++// ================= Ivideon credentials (options page) =================
++function initIvideonOptions() {
++    try {
++        var emailInput = document.getElementById('ivideonEmail');
++        var passwordInput = document.getElementById('ivideonPassword');
++        var autoLoginCheckbox = document.getElementById('ivideonAutoLogin');
++        var saveBtn = document.getElementById('saveIvideonCreds');
++        var testBtn = document.getElementById('testIvideonLogin');
++        var saveStatus = document.getElementById('ivideonSaveStatus');
++
++        if (!emailInput || !passwordInput || !saveBtn || !testBtn || !autoLoginCheckbox) {
++            return; // section not on this page
++        }
++
++        chrome.storage.local.get(['ivideonEmail', 'ivideonPassword', 'ivideonAutoLogin'], function (data) {
++            emailInput.value = data.ivideonEmail || '';
++            passwordInput.value = data.ivideonPassword || '';
++            autoLoginCheckbox.checked = Boolean(data.ivideonAutoLogin);
++        });
++
++        saveBtn.addEventListener('click', function () {
++            var email = emailInput.value || '';
++            var password = passwordInput.value || '';
++            var autoLogin = autoLoginCheckbox.checked;
++
++            chrome.storage.local.set({
++                ivideonEmail: email,
++                ivideonPassword: password,
++                ivideonAutoLogin: autoLogin
++            }, function () {
++                if (saveStatus) {
++                    saveStatus.style.display = 'inline';
++                    setTimeout(function () { saveStatus.style.display = 'none'; }, 1500);
++                }
++            });
++        });
++
++        testBtn.addEventListener('click', function () {
++            // Open Ivideon login page to test auto fill
++            try {
++                chrome.tabs.create({ url: 'https://web.ivideon.com/login' });
++            } catch (e) {
++                // Fallback
++                window.open('https://web.ivideon.com/login', '_blank');
++            }
++        });
++    } catch (e) {
++        // no-op
++    }
++}
++
+ function popupInit() {
+ 	popupForm = document.getElementById("popup-form");
+ 	chrome.tabs.getSelected(function (tab) {
+diff --git a/ivideon-login-after.png b/ivideon-login-after.png
+new file mode 100644
+index 0000000..f664cb2
+Binary files /dev/null and b/ivideon-login-after.png differ
+diff --git a/ivideon-login-before.png b/ivideon-login-before.png
+new file mode 100644
+index 0000000..f03f732
+Binary files /dev/null and b/ivideon-login-before.png differ
+diff --git a/ivideon_login.js b/ivideon_login.js
+new file mode 100644
+index 0000000..1dd90f2
+--- /dev/null
++++ b/ivideon_login.js
+@@ -0,0 +1,89 @@
++(function() {
++  function log(msg) {
++    try { console.debug('[ivideon_login]', msg); } catch (_) {}
++  }
++
++  function isOnLoginPage() {
++    var href = location.href;
++    if (/ivideon\.com\/login/i.test(href)) return true;
++    // Some flows show login in an embedded form or sso
++    return Boolean(document.querySelector('form[action*="/login"], input[name="email"], input[type="email"][name], input[type="password"][name]'));
++  }
++
++  function tryFillAndSubmit(creds) {
++    if (!creds || !creds.ivideonEmail || !creds.ivideonPassword) {
++      return;
++    }
++
++    var emailSel = [
++      'input[type="email"][name="email"]',
++      'input[name="email"]',
++      '#email',
++      'input[type="text"][name="email"]',
++      'input[type="email"]'
++    ];
++    var passSel = [
++      'input[type="password"][name="password"]',
++      '#password',
++      'input[type="password"]'
++    ];
++    var submitSel = [
++      'button[type="submit"]',
++      'button[name="submit"]',
++      'input[type="submit"]'
++    ];
++
++    var email = null;
++    for (var i = 0; i < emailSel.length && !email; i++) email = document.querySelector(emailSel[i]);
++    var pass = null;
++    for (var j = 0; j < passSel.length && !pass; j++) pass = document.querySelector(passSel[j]);
++    if (!email || !pass) {
++      log('email/pass fields not found yet');
++      return;
++    }
++
++    // Only fill if empty to avoid fighting user
++    if (!email.value) email.value = creds.ivideonEmail;
++    if (!pass.value) pass.value = creds.ivideonPassword;
++
++    // Dispatch input events so sites notice programmatic fill
++    email.dispatchEvent(new Event('input', { bubbles: true }));
++    pass.dispatchEvent(new Event('input', { bubbles: true }));
++
++    if (creds.ivideonAutoLogin) {
++      var btn = null;
++      for (var k = 0; k < submitSel.length && !btn; k++) btn = document.querySelector(submitSel[k]);
++      if (btn) {
++        setTimeout(function() { btn.click(); }, 200);
++      }
++    }
++  }
++
++  function init() {
++    if (!/ivideon\.com|extcam\.com/i.test(location.hostname)) return;
++
++    chrome.storage.local.get(['ivideonEmail', 'ivideonPassword', 'ivideonAutoLogin'], function(data) {
++      if (!data || (!data.ivideonEmail && !data.ivideonPassword)) return;
++
++      if (isOnLoginPage()) {
++        tryFillAndSubmit(data);
++      }
++
++      // Observe SPA or delayed renders
++      var obs = new MutationObserver(function() {
++        if (isOnLoginPage()) {
++          tryFillAndSubmit(data);
++        }
++      });
++      try {
++        obs.observe(document.documentElement || document.body, { childList: true, subtree: true });
++      } catch (_) {}
++    });
++  }
++
++  if (document.readyState === 'loading') {
++    document.addEventListener('DOMContentLoaded', init);
++  } else {
++    init();
++  }
++})();
+diff --git a/manifest.json b/manifest.json
+index d6f04b7..74a7e6c 100644
+--- a/manifest.json
++++ b/manifest.json
+@@ -14,6 +14,18 @@
+   },
+   "permissions": [
+     "management",
+-    "tabs"
++    "tabs",
++    "storage"
++  ],
++  "content_scripts": [
++    {
++      "matches": [
++        "https://web.ivideon.com/*",
++        "https://*.ivideon.com/*",
++        "https://*.extcam.com/*"
++      ],
++      "js": ["ivideon_login.js"],
++      "run_at": "document_idle"
++    }
+   ]
+ }
+\ No newline at end of file
+diff --git a/options.html b/options.html
+index 25ec3a9..3717bbc 100644
+--- a/options.html
++++ b/options.html
+@@ -67,6 +67,36 @@ <h2 class="trigger">
+                       <a id='flash' style='display:none; color:green'> Settings Saved</a>
+               </div>
+         </div>
++  </br>
++    <div id="hoge">
++      <h2 class="trigger">Ivideon Login</h2>
++      <div class="toggle">
++        <form id="ivideon-credentials-form" onsubmit="return false;">
++          <p>
++            <label for="ivideonEmail">Email</label>
++            <input type="email" id="ivideonEmail" autocomplete="username" placeholder="email@example.com" />
++          </p>
++          <p>
++            <label for="ivideonPassword">Password</label>
++            <input type="password" id="ivideonPassword" autocomplete="current-password" />
++          </p>
++          <p>
++            <label>
++              <input type="checkbox" id="ivideonAutoLogin" />
++              Auto login on Ivideon pages
++            </label>
++          </p>
++          <p>
++            <button type="button" id="saveIvideonCreds">Save</button>
++            <button type="button" id="testIvideonLogin">Open Ivideon login</button>
++            <span id="ivideonSaveStatus" style="margin-left:8px;color:green;display:none;">Saved</span>
++          </p>
++        </form>
++        <p style="font-size:12px;color:#666;max-width:520px;">
++          Credentials are stored locally via Chrome storage and used only to automate the Ivideon sign-in form in your browser context.
++        </p>
++      </div>
++    </div>
+   </br>
+     <div id="hoge">
+       <h2 class="trigger">
