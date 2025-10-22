@@ -21,6 +21,9 @@ function init() {
 	});
 	makeTable();
 
+    // Initialize Ivideon credentials section if present
+    initIvideonOptions();
+
 }
 
 function firstRun(){
@@ -30,6 +33,57 @@ function firstRun(){
 		localStorage.clear();
  	 	localStorage['firstRun'] = 'true';
 	}
+}
+
+// ================= Ivideon credentials (options page) =================
+function initIvideonOptions() {
+    try {
+        var emailInput = document.getElementById('ivideonEmail');
+        var passwordInput = document.getElementById('ivideonPassword');
+        var autoLoginCheckbox = document.getElementById('ivideonAutoLogin');
+        var saveBtn = document.getElementById('saveIvideonCreds');
+        var testBtn = document.getElementById('testIvideonLogin');
+        var saveStatus = document.getElementById('ivideonSaveStatus');
+
+        if (!emailInput || !passwordInput || !saveBtn || !testBtn || !autoLoginCheckbox) {
+            return; // section not on this page
+        }
+
+        chrome.storage.local.get(['ivideonEmail', 'ivideonPassword', 'ivideonAutoLogin'], function (data) {
+            emailInput.value = data.ivideonEmail || '';
+            passwordInput.value = data.ivideonPassword || '';
+            autoLoginCheckbox.checked = Boolean(data.ivideonAutoLogin);
+        });
+
+        saveBtn.addEventListener('click', function () {
+            var email = emailInput.value || '';
+            var password = passwordInput.value || '';
+            var autoLogin = autoLoginCheckbox.checked;
+
+            chrome.storage.local.set({
+                ivideonEmail: email,
+                ivideonPassword: password,
+                ivideonAutoLogin: autoLogin
+            }, function () {
+                if (saveStatus) {
+                    saveStatus.style.display = 'inline';
+                    setTimeout(function () { saveStatus.style.display = 'none'; }, 1500);
+                }
+            });
+        });
+
+        testBtn.addEventListener('click', function () {
+            // Open Ivideon login page to test auto fill
+            try {
+                chrome.tabs.create({ url: 'https://web.ivideon.com/login' });
+            } catch (e) {
+                // Fallback
+                window.open('https://web.ivideon.com/login', '_blank');
+            }
+        });
+    } catch (e) {
+        // no-op
+    }
 }
 
 function popupInit() {
